@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tempo Trainer</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f6f4a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+/* Layout: одна колонка, крупная цифра темпа по центру, управление снизу */
+:root{
+  --bg:#f3f5f0; --surface:#ffffff; --fg:#17201a; --muted:#5f6b63;
+  --line:#d6ddd6; --accent:#1f6f4a; --good:#1f6f4a; --warn:#b4731b; --bad:#b3342b;
+  --display:"Arial Narrow","Helvetica Neue",Arial,sans-serif;
+  --body:-apple-system,"Segoe UI",system-ui,Roboto,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121714; --surface:#1b231e; --fg:#e9eee9; --muted:#97a39a;
+  --line:#2c362f; --accent:#5fcf95; --good:#5fcf95; --warn:#e6a43c; --bad:#ef6a5f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121714; --surface:#1b231e; --fg:#e9eee9; --muted:#97a39a;
+  --line:#2c362f; --accent:#5fcf95; --good:#5fcf95; --warn:#e6a43c; --bad:#ef6a5f; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:12px 24px}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+h1{font-family:var(--display);font-weight:700;font-size:28px;margin:0;letter-spacing:.01em}
+.status{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.on{background:var(--good)}
+.hero{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px 16px;text-align:center}
+.ratio{font-family:var(--display);font-weight:700;font-size:112px;line-height:1;font-variant-numeric:tabular-nums}
+.ratio small{font-size:40px;color:var(--muted);font-weight:500}
+.verdict{font-family:var(--display);font-size:24px;font-weight:500;margin-top:4px;min-height:30px}
+.verdict.good{color:var(--good)} .verdict.warn{color:var(--warn)} .verdict.bad{color:var(--bad)}
+.phases{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.phase{border-top:2px solid var(--line);padding-top:6px;text-align:left}
+.phase b{display:block;font-family:var(--display);font-size:30px;font-weight:500;font-variant-numeric:tabular-nums}
+.phase span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;display:flex;margin-top:10px}
+.bar i{display:block;height:100%}
+.bar .b{background:var(--accent);opacity:.55}.bar .d{background:var(--accent)}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+button{font-family:var(--body);font-size:15px;font-weight:600;border:1px solid var(--line);background:var(--surface);
+  color:var(--fg);border-radius:8px;padding:10px 14px;cursor:pointer;flex:1 1 auto;min-height:44px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+button.active{border-color:var(--accent);color:var(--accent)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:disabled{opacity:.5;cursor:default}
+section{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+h2{font-family:var(--display);font-size:18px;font-weight:700;margin:0 0 10px;letter-spacing:.04em;text-transform:uppercase}
+.ref{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end}
+.ref label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:block}
+.ref input{width:100%;font:inherit;font-size:18px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);
+  font-variant-numeric:tabular-nums}
+.ref .calc{font-family:var(--display);font-size:30px;font-weight:500;font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px}
+.stats div{border-top:2px solid var(--line);padding-top:6px}
+.stats b{display:block;font-family:var(--display);font-size:26px;font-weight:500;font-variant-numeric:tabular-nums}
+.stats span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:15px}
+td{padding:6px 4px;border-bottom:1px solid var(--line)}
+td:first-child{color:var(--muted);width:36px}
+td:last-child{text-align:right;font-weight:600}
+.empty{color:var(--muted);font-size:14px}
+.note{font-size:13px;color:var(--muted);margin:0}
+.hidden{display:none!important}
+@media (max-width:420px){.ratio{font-size:96px}}
+@media (prefers-reduced-motion:no-preference){.hero.flash{animation:flash .5s}}
+@keyframes flash{from{box-shadow:0 0 0 4px var(--accent)}to{box-shadow:0 0 0 0 transparent}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Tempo Trainer</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">не подключено</span></div>
+  </header>
+
+  <div class="hero" id="hero">
+    <div class="ratio"><span id="ratio">—</span><small> : 1</small></div>
+    <div class="verdict" id="verdict">Подключите датчик или включите демо</div>
+    <div class="phases">
+      <div class="phase"><b id="back">—</b><span>замах, мс</span></div>
+      <div class="phase"><b id="down">—</b><span>удар, мс</span></div>
+    </div>
+    <div class="bar"><i class="b" id="barB" style="width:0"></i><i class="d" id="barD" style="width:0"></i></div>
+  </div>
+
+  <div class="row" id="clubRow">
+    <button class="active" data-club="7i" id="club7i">7 айрон</button>
+    <button data-club="dr" id="clubDr">Драйвер</button>
+  </div>
+
+  <div class="row">
+    <button class="primary" id="btnConnect">Подключить датчик</button>
+    <button id="btnDemo">Демо</button>
+    <button id="btnVoice" class="active">Голос: вкл</button>
+    <button id="btnMetro">Метроном</button>
+  </div>
+
+  <section>
+    <h2>Эталон</h2>
+    <div class="ref">
+      <div><label for="refBack">Замах, мс</label><input id="refBack" type="number" inputmode="numeric" value="900" min="200" max="2500" step="10"></div>
+      <div><label for="refDown">Удар, мс</label><input id="refDown" type="number" inputmode="numeric" value="300" min="80" max="900" step="10"></div>
+      <div><label>Темп</label><div class="calc" id="refRatio">3.0</div></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnSetRef">Эталон из последних 5</button>
+    </div>
+    <p class="note" style="margin-top:8px">Эталон и история — отдельно для каждой клюшки. Допуск ±0.2 считается «в темпе». Тур: около 3:1 (айрон ~900/300, драйвер ~1000/330).</p>
+  </section>
+
+  <section>
+    <h2>Сессия</h2>
+    <div class="stats">
+      <div><b id="sCount">0</b><span>ударов</span></div>
+      <div><b id="sMean">—</b><span>средний</span></div>
+      <div><b id="sStd">—</b><span>разброс</span></div>
+    </div>
+    <table id="hist"></table>
+    <p class="empty" id="histEmpty">Пока нет ударов.</p>
+    <div class="row" style="margin-top:10px">
+      <button id="btnClear">Очистить</button>
+      <button id="btnCopy">Скопировать CSV</button>
+    </div>
+  </section>
+
+  <p class="note">Bluetooth работает в Chrome на Android и на компьютере. На iPhone используйте браузер Bluefy.</p>
+</div>
+
+<script>
+const SERVICE='7a1e0000-5b8c-4c2a-9f6e-2d4b3c1a0001', CHAR='7a1e0001-5b8c-4c2a-9f6e-2d4b3c1a0001';
+const TOL=0.2;
+const $=id=>document.getElementById(id);
+let swings=[], voice=true, demoTimer=null, metroOn=false, metroTimer=null, audio=null, device=null;
+const CLUBS={ '7i':{name:'7 айрон', b:900, d:300}, 'dr':{name:'Драйвер', b:1000, d:330} };
+let club='7i';
+try{ club=localStorage.getItem('tempo.club')||'7i'; if(!CLUBS[club]) club='7i'; }catch(e){}
+
+function loadClub(){
+  swings=[]; const def=CLUBS[club];
+  $('refBack').value=def.b; $('refDown').value=def.d;
+  try{ const s=localStorage.getItem('tempo.swings.'+club); if(s) swings=JSON.parse(s);
+       const r=JSON.parse(localStorage.getItem('tempo.ref.'+club)||'null'); if(r){$('refBack').value=r.b;$('refDown').value=r.d;} }catch(e){}
+  document.querySelectorAll('#clubRow button').forEach(b=>b.classList.toggle('active',b.dataset.club===club));
+  const last=swings[swings.length-1];
+  if(last){ $('ratio').textContent=fmt(last.r); $('back').textContent=last.b; $('down').textContent=last.d;
+    const v=verdictFor(last.r); $('verdict').textContent=v.t; $('verdict').className='verdict '+v.c;
+    const tot=last.b+last.d; $('barB').style.width=(last.b/tot*100)+'%'; $('barD').style.width=(last.d/tot*100)+'%'; }
+  else { $('ratio').textContent='—'; $('back').textContent='—'; $('down').textContent='—';
+    $('verdict').textContent=def.name+': нет ударов'; $('verdict').className='verdict'; $('barB').style.width='0'; $('barD').style.width='0'; }
+  render();
+}
+function ref(){ const b=+$('refBack').value||900, d=+$('refDown').value||300; return {b,d,r:b/d}; }
+function fmt(x){ return x.toFixed(1).replace('.',','); }
+function save(){ try{ localStorage.setItem('tempo.swings.'+club,JSON.stringify(swings.slice(-200)));
+  localStorage.setItem('tempo.ref.'+club,JSON.stringify({b:$('refBack').value,d:$('refDown').value}));
+  localStorage.setItem('tempo.club',club); }catch(e){} }
+
+function verdictFor(r){
+  const R=ref().r;
+  if(r<R-TOL) return {t:'Спешите на ударе',c:'bad'};
+  if(r>R+TOL) return {t:'Затягиваете удар',c:'warn'};
+  return {t:'В темпе',c:'good'};
+}
+
+function speak(r,v){
+  if(!voice||!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(fmt(r)+'. '+v.t); u.lang='ru-RU'; u.rate=1.1;
+  speechSynthesis.speak(u);
+}
+
+function addSwing(b,d,g){
+  const r=b/d, v=verdictFor(r);
+  swings.push({t:Date.now(),b,d,g,r}); save();
+  $('ratio').textContent=fmt(r); $('back').textContent=b; $('down').textContent=d;
+  $('verdict').textContent=v.t; $('verdict').className='verdict '+v.c;
+  const tot=b+d; $('barB').style.width=(b/tot*100)+'%'; $('barD').style.width=(d/tot*100)+'%';
+  $('hero').classList.remove('flash'); void $('hero').offsetWidth; $('hero').classList.add('flash');
+  speak(r,v); render();
+}
+
+function render(){
+  const n=swings.length; $('sCount').textContent=n;
+  if(n){ const m=swings.reduce((a,s)=>a+s.r,0)/n;
+    const sd=Math.sqrt(swings.reduce((a,s)=>a+(s.r-m)**2,0)/n);
+    $('sMean').textContent=fmt(m); $('sStd').textContent='±'+fmt(sd); }
+  else { $('sMean').textContent='—'; $('sStd').textContent='—'; }
+  const rows=swings.slice(-15).reverse();
+  $('hist').innerHTML=rows.map((s,i)=>{const v=verdictFor(s.r);
+    return `<tr><td>${n-i}</td><td>${s.b} / ${s.d} мс</td><td style="color:var(--${v.c})">${v.t}</td><td>${fmt(s.r)}</td></tr>`;}).join('');
+  $('histEmpty').classList.toggle('hidden',n>0);
+  $('refRatio').textContent=fmt(ref().r);
+}
+
+/* ---------- Bluetooth ---------- */
+function setStatus(on,text){ $('dot').classList.toggle('on',on); $('statusText').textContent=text; }
+function onPacket(ev){
+  const txt=new TextDecoder().decode(ev.target.value).trim();
+  const [b,d,g]=txt.split(',').map(Number);
+  if(b>0&&d>0) addSwing(b,d,(g||0)/10);
+}
+async function connect(){
+  if(!navigator.bluetooth){ setStatus(false,'Bluetooth недоступен в этом браузере'); return; }
+  try{
+    setStatus(false,'поиск…');
+    device=await navigator.bluetooth.requestDevice({filters:[{services:[SERVICE]}]});
+    device.addEventListener('gattserverdisconnected',()=>setStatus(false,'отключено'));
+    const server=await device.gatt.connect();
+    const svc=await server.getPrimaryService(SERVICE);
+    const ch=await svc.getCharacteristic(CHAR);
+    await ch.startNotifications();
+    ch.addEventListener('characteristicvaluechanged',onPacket);
+    setStatus(true,'датчик подключён'); stopDemo();
+  }catch(e){ setStatus(false,'не удалось подключить: '+(e.message||e)); }
+}
+
+/* ---------- Демо (без железа) ---------- */
+function startDemo(){
+  stopDemo(); $('btnDemo').classList.add('active'); setStatus(true,'демо-режим');
+  const tick=()=>{ const b=Math.round(820+Math.random()*220), d=Math.round(250+Math.random()*110);
+    addSwing(b,d,8+Math.random()*4); demoTimer=setTimeout(tick,3500); };
+  demoTimer=setTimeout(tick,800);
+}
+function stopDemo(){ if(demoTimer){clearTimeout(demoTimer);demoTimer=null;$('btnDemo').classList.remove('active');} }
+
+/* ---------- Метроном: три щелчка — старт, вершина, удар ---------- */
+function click(at,freq){ const o=audio.createOscillator(), g=audio.createGain();
+  o.frequency.value=freq; o.connect(g); g.connect(audio.destination);
+  g.gain.setValueAtTime(0.0001,at); g.gain.exponentialRampToValueAtTime(0.6,at+0.005); g.gain.exponentialRampToValueAtTime(0.0001,at+0.08);
+  o.start(at); o.stop(at+0.1); }
+function metroCycle(){
+  if(!metroOn) return;
+  const {b,d}=ref(); const t=audio.currentTime+0.1;
+  click(t,660); click(t+b/1000,880); click(t+(b+d)/1000,440);
+  metroTimer=setTimeout(metroCycle,b+d+2500);
+}
+function toggleMetro(){
+  metroOn=!metroOn; $('btnMetro').classList.toggle('active',metroOn);
+  if(metroOn){ if(!audio) audio=new (window.AudioContext||window.webkitAudioContext)(); audio.resume(); metroCycle(); }
+  else { clearTimeout(metroTimer); }
+}
+
+/* ---------- Кнопки ---------- */
+$('btnConnect').onclick=connect;
+$('btnDemo').onclick=()=>demoTimer?stopDemo():startDemo();
+$('btnVoice').onclick=()=>{voice=!voice;$('btnVoice').textContent='Голос: '+(voice?'вкл':'выкл');$('btnVoice').classList.toggle('active',voice);};
+$('btnMetro').onclick=toggleMetro;
+$('btnSetRef').onclick=()=>{ const last=swings.slice(-5); if(!last.length) return;
+  $('refBack').value=Math.round(last.reduce((a,s)=>a+s.b,0)/last.length);
+  $('refDown').value=Math.round(last.reduce((a,s)=>a+s.d,0)/last.length); save(); render(); };
+['refBack','refDown'].forEach(id=>$(id).oninput=()=>{save();render();});
+$('btnClear').onclick=()=>{swings=[];save();render();$('ratio').textContent='—';$('back').textContent='—';$('down').textContent='—';
+  $('verdict').textContent='';$('barB').style.width='0';$('barD').style.width='0';};
+$('btnCopy').onclick=()=>{ const csv='club,time,backswing_ms,downswing_ms,peak_g,ratio\n'+
+  swings.map(s=>`${club},${new Date(s.t).toISOString()},${s.b},${s.d},${s.g.toFixed(1)},${s.r.toFixed(2)}`).join('\n');
+  navigator.clipboard.writeText(csv).then(()=>{$('btnCopy').textContent='Скопировано';setTimeout(()=>$('btnCopy').textContent='Скопировать CSV',1500);}).catch(()=>{}); };
+document.querySelectorAll('#clubRow button').forEach(b=>b.onclick=()=>{ save(); club=b.dataset.club; save(); loadClub(); });
+
+loadClub();
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{})); }
+</script>
+</body>
+</html>
