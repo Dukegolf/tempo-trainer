@@ -71,6 +71,19 @@ td:last-child{text-align:right;font-weight:600}
 .empty{color:var(--muted);font-size:14px}
 .note{font-size:13px;color:var(--muted);margin:0}
 .hidden{display:none!important}
+.modeRow{display:flex;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.modeRow button{flex:1;border:0;border-radius:0;background:var(--surface)}
+.modeRow button.active{background:var(--accent);color:var(--bg)}
+.gauge{width:180px;height:180px;margin:0 auto;display:block}
+.deg{font-family:var(--display);font-weight:700;font-size:72px;line-height:1;font-variant-numeric:tabular-nums}
+.deg small{font-size:32px;color:var(--muted);font-weight:500}
+.pstate{font-family:var(--display);font-size:24px;min-height:30px;margin-top:6px}
+.good .pstate{color:var(--good)} .warn .pstate{color:var(--warn)} .bad .pstate{color:var(--bad)}
+.cfg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cfg label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:block}
+.cfg input{width:100%;font:inherit;font-size:18px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+.dayBar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line);margin-top:10px}
+.dayBar i{display:block;height:100%}
 @media (max-width:420px){.ratio{font-size:96px}}
 @media (prefers-reduced-motion:no-preference){.hero.flash{animation:flash .5s}}
 @keyframes flash{from{box-shadow:0 0 0 4px var(--accent)}to{box-shadow:0 0 0 0 transparent}}
@@ -83,6 +96,12 @@ td:last-child{text-align:right;font-weight:600}
     <div class="status"><span class="dot" id="dot"></span><span id="statusText">не подключено</span></div>
   </header>
 
+  <div class="modeRow" id="modeRow">
+    <button class="active" data-mode="golf" id="modeGolf">Гольф</button>
+    <button data-mode="posture" id="modePosture">Осанка</button>
+  </div>
+
+  <div id="golfUI">
   <div class="hero" id="hero">
     <div class="ratio"><span id="ratio">—</span><small> : 1</small></div>
     <div class="verdict" id="verdict">Подключите датчик или включите демо</div>
@@ -133,11 +152,56 @@ td:last-child{text-align:right;font-weight:600}
     </div>
   </section>
 
+  </div><!-- /golfUI -->
+
+  <div id="postureUI" class="hidden">
+    <div class="hero" id="phero">
+      <div class="deg"><span id="pdeg">—</span><small>°</small></div>
+      <div class="pstate" id="pstate">Подключите датчик и откалибруйте</div>
+      <div class="phases">
+        <div class="phase"><b id="pfwd">—</b><span>вперёд, °</span></div>
+        <div class="phase"><b id="pside">—</b><span>вбок, °</span></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="primary" id="btnConnectP">Подключить датчик</button>
+      <button id="btnCalib">Калибровать</button>
+      <button id="btnDemoP">Демо</button>
+      <button id="btnVoiceP" class="active">Сигнал: вкл</button>
+    </div>
+
+    <section>
+      <h2>Настройки</h2>
+      <div class="cfg">
+        <div><label for="pThr">Порог, °</label><input id="pThr" type="number" inputmode="numeric" value="12" min="5" max="30"></div>
+        <div><label for="pGrace">Терпимость, с</label><input id="pGrace" type="number" inputmode="numeric" value="15" min="3" max="120"></div>
+      </div>
+      <p class="note" style="margin-top:8px">Калибровка: сядьте или встаньте ровно, нажмите «Калибровать» и не двигайтесь 2 секунды. Если наклон держится дольше терпимости — сигнал.</p>
+    </section>
+
+    <section>
+      <h2>Сегодня</h2>
+      <div class="stats">
+        <div><b id="pGood">—</b><span>в норме</span></div>
+        <div><b id="pTime">0 мин</b><span>отслежено</span></div>
+        <div><b id="pAlerts">0</b><span>сигналов</span></div>
+      </div>
+      <div class="dayBar"><i id="dbGood" style="background:var(--good);width:0"></i><i id="dbBad" style="background:var(--bad);width:0"></i></div>
+      <div class="row" style="margin-top:10px">
+        <button id="btnPClear">Сбросить день</button>
+        <button id="btnPCopy">Скопировать CSV</button>
+      </div>
+    </section>
+  </div><!-- /postureUI -->
+
   <p class="note">Bluetooth работает в Chrome на Android и на компьютере. На iPhone используйте браузер Bluefy.</p>
 </div>
 
 <script>
-const SERVICE='7a1e0000-5b8c-4c2a-9f6e-2d4b3c1a0001', CHAR='7a1e0001-5b8c-4c2a-9f6e-2d4b3c1a0001';
+const SERVICE='7a1e0000-5b8c-4c2a-9f6e-2d4b3c1a0001', CHAR='7a1e0001-5b8c-4c2a-9f6e-2d4b3c1a0001',
+      MODE_CHAR='7a1e0002-5b8c-4c2a-9f6e-2d4b3c1a0001', POSTURE_CHAR='7a1e0003-5b8c-4c2a-9f6e-2d4b3c1a0001';
+let modeChar=null, appMode='golf';
 const TOL=0.2;
 const $=id=>document.getElementById(id);
 let swings=[], voice=true, demoTimer=null, metroOn=false, metroTimer=null, audio=null, device=null;
@@ -220,7 +284,10 @@ async function connect(){
     const ch=await svc.getCharacteristic(CHAR);
     await ch.startNotifications();
     ch.addEventListener('characteristicvaluechanged',onPacket);
-    setStatus(true,'датчик подключён'); stopDemo();
+    try{ const pc=await svc.getCharacteristic(POSTURE_CHAR); await pc.startNotifications();
+         pc.addEventListener('characteristicvaluechanged',onPosturePacket);
+         modeChar=await svc.getCharacteristic(MODE_CHAR); await sendMode(); }catch(e){ modeChar=null; }
+    setStatus(true,'датчик подключён'); stopDemo(); stopDemoP();
   }catch(e){ setStatus(false,'не удалось подключить: '+(e.message||e)); }
 }
 
@@ -250,6 +317,98 @@ function toggleMetro(){
   else { clearTimeout(metroTimer); }
 }
 
+/* ---------- Осанка ---------- */
+let pRef=null, pFwdAxis=null, pLast=null, pBadSince=0, pAlertAt=0, pTick=null, demoPTimer=null, pVoice=true, wakeLock=null;
+let pDay={date:todayKey(),good:0,bad:0,alerts:0,log:[]};
+function todayKey(){ return new Date().toISOString().slice(0,10); }
+try{ const d=JSON.parse(localStorage.getItem('posture.day')||'null'); if(d&&d.date===todayKey()) pDay=d;
+     const r=JSON.parse(localStorage.getItem('posture.ref')||'null'); if(r){pRef=r.ref;pFwdAxis=r.fwd;}
+     const c=JSON.parse(localStorage.getItem('posture.cfg')||'null'); if(c){$('pThr').value=c.thr;$('pGrace').value=c.grace;} }catch(e){}
+function pSave(){ try{ localStorage.setItem('posture.day',JSON.stringify(pDay));
+  localStorage.setItem('posture.ref',JSON.stringify({ref:pRef,fwd:pFwdAxis}));
+  localStorage.setItem('posture.cfg',JSON.stringify({thr:$('pThr').value,grace:$('pGrace').value})); }catch(e){} }
+const norm=v=>{const n=Math.hypot(...v)||1;return v.map(x=>x/n);};
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+async function sendMode(){ if(!modeChar) return; try{ await modeChar.writeValue(new Uint8Array([appMode==='posture'?80:71])); }catch(e){} }
+function onPosturePacket(ev){
+  const t=new TextDecoder().decode(ev.target.value).trim(); const v=t.split(',').map(Number);
+  if(v.length===3&&v.every(Number.isFinite)) onGravity(norm(v));
+}
+function onGravity(g){
+  pLast=g;
+  if(!pRef){ $('pdeg').textContent='—'; $('pstate').textContent='Нажмите «Калибровать»'; $('phero').className='hero'; return; }
+  const c=Math.max(-1,Math.min(1,dot(g,pRef))); const ang=Math.acos(c)*180/Math.PI;
+  // разложение: вперёд — по оси, запомненной при калибровке (ось, перпендикулярная gравитации, направленная "вперёд")
+  let fwd=null, side=null;
+  if(pFwdAxis){ const lat=norm(cross(pRef,pFwdAxis)); fwd=Math.asin(Math.max(-1,Math.min(1,dot(g,pFwdAxis))))*180/Math.PI; side=Math.asin(Math.max(-1,Math.min(1,dot(g,lat))))*180/Math.PI; }
+  const thr=+$('pThr').value||12, grace=(+$('pGrace').value||15)*1000, now=Date.now();
+  const bad=ang>thr;
+  if(bad){ if(!pBadSince) pBadSince=now; } else pBadSince=0;
+  const over=bad&&now-pBadSince>grace;
+  $('pdeg').textContent=ang.toFixed(0);
+  $('pfwd').textContent=fwd===null?'—':(fwd>0?'+':'')+fwd.toFixed(0);
+  $('pside').textContent=side===null?'—':(side>0?'+':'')+side.toFixed(0);
+  $('phero').className='hero '+(over?'bad':bad?'warn':'good');
+  $('pstate').textContent=over?'Выпрямитесь':bad?'Наклон':'Ровно';
+  // статистика: пакет раз в 0.5 с
+  if(pDay.date!==todayKey()) pDay={date:todayKey(),good:0,bad:0,alerts:0,log:[]};
+  if(bad) pDay.bad+=0.5; else pDay.good+=0.5;
+  if(over&&now-pAlertAt>30000){ pAlertAt=now; pDay.alerts++; alertPosture(); }
+  if(pDay.log.length===0||now-pDay.log[pDay.log.length-1].t>60000) pDay.log.push({t:now,a:+ang.toFixed(1)});
+  if(Math.random()<0.1) pSave();
+  renderPosture();
+}
+function cross(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function alertPosture(){
+  if(!pVoice) return;
+  try{ navigator.vibrate&&navigator.vibrate([200,100,200]); }catch(e){}
+  if('speechSynthesis' in window){ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance('Выпрямитесь'); u.lang='ru-RU'; speechSynthesis.speak(u); }
+}
+function renderPosture(){
+  const tot=pDay.good+pDay.bad; const pct=tot?Math.round(pDay.good/tot*100):null;
+  $('pGood').textContent=pct===null?'—':pct+'%'; $('pTime').textContent=Math.round(tot/60)+' мин'; $('pAlerts').textContent=pDay.alerts;
+  $('dbGood').style.width=(tot?pDay.good/tot*100:0)+'%'; $('dbBad').style.width=(tot?pDay.bad/tot*100:0)+'%';
+}
+function calibrate(){
+  if(!pLast){ $('pstate').textContent='Нет данных с датчика'; return; }
+  $('pstate').textContent='Не двигайтесь…'; const samples=[];
+  const h=()=>{ if(pLast) samples.push(pLast); };
+  const iv=setInterval(h,250);
+  setTimeout(()=>{ clearInterval(iv); if(!samples.length) return;
+    pRef=norm(samples.reduce((a,s)=>[a[0]+s[0],a[1]+s[1],a[2]+s[2]],[0,0,0]));
+    // ось "вперёд": берём ось датчика, наиболее перпендикулярную гравитации и ближайшую к его -Y (корпус вертикально, USB вверх → наклон вперёд меняет X/Z)
+    const cand=[[1,0,0],[0,0,1],[-1,0,0],[0,0,-1]].map(c=>{const p=norm(c.map((x,i)=>x-dot(c,pRef)*pRef[i]));return p;});
+    pFwdAxis=cand[0]; pBadSince=0; pSave();
+    $('pstate').textContent='Откалибровано'; $('phero').className='hero good';
+  },2000);
+}
+function startDemoP(){
+  stopDemoP(); $('btnDemoP').classList.add('active'); setStatus(true,'демо-режим');
+  let t=0; const tick=()=>{ t+=0.5; const lean=(Math.sin(t/20)*0.5+0.5)*25*Math.PI/180; // медленно сутулимся и выпрямляемся
+    onGravity(norm([Math.sin(lean)*0.9, -Math.cos(lean), Math.sin(lean)*0.3+ (Math.random()-0.5)*0.02])); demoPTimer=setTimeout(tick,500); };
+  if(!pRef){ pLast=[0,-1,0]; pRef=[0,-1,0]; pFwdAxis=[1,0,0]; }
+  tick();
+}
+function stopDemoP(){ if(demoPTimer){clearTimeout(demoPTimer);demoPTimer=null;$('btnDemoP').classList.remove('active');} }
+async function keepAwake(){ try{ if('wakeLock' in navigator&&!wakeLock){ wakeLock=await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release',()=>{wakeLock=null;}); } }catch(e){} }
+function setMode(m){
+  appMode=m; try{ localStorage.setItem('app.mode',m); }catch(e){}
+  document.querySelectorAll('#modeRow button').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  $('golfUI').classList.toggle('hidden',m!=='golf'); $('postureUI').classList.toggle('hidden',m!=='posture');
+  if(m==='posture'){ stopDemo(); keepAwake(); renderPosture(); } else stopDemoP();
+  sendMode();
+}
+document.querySelectorAll('#modeRow button').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+$('btnConnectP').onclick=connect;
+$('btnCalib').onclick=calibrate;
+$('btnDemoP').onclick=()=>demoPTimer?stopDemoP():startDemoP();
+$('btnVoiceP').onclick=()=>{pVoice=!pVoice;$('btnVoiceP').textContent='Сигнал: '+(pVoice?'вкл':'выкл');$('btnVoiceP').classList.toggle('active',pVoice);};
+['pThr','pGrace'].forEach(id=>$(id).oninput=pSave);
+$('btnPClear').onclick=()=>{pDay={date:todayKey(),good:0,bad:0,alerts:0,log:[]};pSave();renderPosture();};
+$('btnPCopy').onclick=()=>{ const csv='time,angle_deg\n'+pDay.log.map(l=>`${new Date(l.t).toISOString()},${l.a}`).join('\n');
+  navigator.clipboard.writeText(csv).then(()=>{$('btnPCopy').textContent='Скопировано';setTimeout(()=>$('btnPCopy').textContent='Скопировать CSV',1500);}).catch(()=>{}); };
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&appMode==='posture') keepAwake(); });
+
 /* ---------- Кнопки ---------- */
 $('btnConnect').onclick=connect;
 $('btnDemo').onclick=()=>demoTimer?stopDemo():startDemo();
@@ -267,6 +426,7 @@ $('btnCopy').onclick=()=>{ const csv='club,time,backswing_ms,downswing_ms,peak_g
 document.querySelectorAll('#clubRow button').forEach(b=>b.onclick=()=>{ save(); club=b.dataset.club; save(); loadClub(); });
 
 loadClub();
+try{ setMode(localStorage.getItem('app.mode')||'golf'); }catch(e){ setMode('golf'); }
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{})); }
 </script>
 </body>

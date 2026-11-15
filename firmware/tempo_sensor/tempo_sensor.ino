@@ -1,8 +1,13 @@
 /*
- * Tempo Sensor — датчик темпа гольф-свинга
+ * Tempo Sensor — датчик темпа гольф-свинга + контроль осанки
  * Плата: Seeed XIAO nRF52840 Sense (встроенный IMU LSM6DS3 + BLE)
  *
- * Что делает:
+ * Режимы (переключает приложение записью в MODE-характеристику):
+ *   'G' — гольф: детекция темпа свинга (ниже)
+ *   'P' — осанка: раз в 500 мс отправляет сглаженный вектор гравитации "ax,ay,az" (×1000),
+ *         углы и калибровку считает приложение
+ *
+ * Гольф, что делает:
  *   1. Ждёт, пока клюшка неподвижна (адрес).
  *   2. Старт замаха — угловая скорость превысила START_DPS.
  *   3. Вершина — доминирующая ось гироскопа меняет знак.
@@ -36,8 +41,18 @@ const float MOTION_DPS = 30.0;    // что считать "движением" 
 // ---------- BLE ----------
 const char* SERVICE_UUID = "7a1e0000-5b8c-4c2a-9f6e-2d4b3c1a0001";
 const char* TEMPO_UUID   = "7a1e0001-5b8c-4c2a-9f6e-2d4b3c1a0001";
+const char* MODE_UUID    = "7a1e0002-5b8c-4c2a-9f6e-2d4b3c1a0001";
+const char* POSTURE_UUID = "7a1e0003-5b8c-4c2a-9f6e-2d4b3c1a0001";
 BLEService tempoService(SERVICE_UUID);
 BLECharacteristic tempoChar(TEMPO_UUID, BLERead | BLENotify, 20);
+BLEByteCharacteristic modeChar(MODE_UUID, BLERead | BLEWrite);
+BLECharacteristic postureChar(POSTURE_UUID, BLERead | BLENotify, 24);
+
+char mode = 'G';                       // 'G' гольф / 'P' осанка
+const uint32_t POSTURE_SLEEP_MS = 60UL * 60UL * 1000UL;  // в режиме осанки спать только через час без движения
+const float POSTURE_MOTION_DPS = 8.0;  // сидящий человек всё равно чуть двигается
+float fx = 0, fy = 0, fz = 1;          // сглаженная гравитация
+const float LP_ALPHA = 0.02;           // ~0.25 с при 200 Гц
 
 LSM6DS3 imu(I2C_MODE, 0x6A);
 
@@ -115,8 +130,12 @@ void setup() {
   BLE.setDeviceName("TempoSensor");
   BLE.setAdvertisedService(tempoService);
   tempoService.addCharacteristic(tempoChar);
+  tempoService.addCharacteristic(modeChar);
+  tempoService.addCharacteristic(postureChar);
   BLE.addService(tempoService);
   tempoChar.writeValue("0,0,0");
+  modeChar.writeValue((uint8_t)mode);
+  postureChar.writeValue("0,0,1000");
   BLE.advertise();
   Serial.println("TempoSensor ready");
   blink(3);
@@ -143,9 +162,33 @@ void loop() {
   float amag  = sqrtf(ax*ax + ay*ay + az*az);
   uint32_t now = millis();
 
-  // ---- автосон ----
-  if (omega > MOTION_DPS) tLastMotion = now;
-  if (now - tLastMotion > SLEEP_AFTER_MS) goToSleep();
+  // ---- переключение режима из приложения ----
+  if (modeChar.written()) {
+    uint8_t m = modeChar.value();
+    if (m == 'G' || m == 'P') { mode = (char)m; state = IDLE; tStill = 0; tLastMotion = now;
+      if (DEBUG) { Serial.print(">> MODE "); Serial.println(mode); } }
+  }
+
+  // ---- автосон (в режиме осанки — мягче) ----
+  float motionThr = mode == 'P' ? POSTURE_MOTION_DPS : MOTION_DPS;
+  uint32_t sleepAfter = mode == 'P' ? POSTURE_SLEEP_MS : SLEEP_AFTER_MS;
+  if (omega > motionThr) tLastMotion = now;
+  if (now - tLastMotion > sleepAfter) goToSleep();
+
+  // ---- режим осанки ----
+  if (mode == 'P') {
+    fx += LP_ALPHA * (ax - fx); fy += LP_ALPHA * (ay - fy); fz += LP_ALPHA * (az - fz);
+    static uint32_t tPost = 0;
+    if (now - tPost >= 500) {
+      tPost = now;
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%d,%d,%d", (int)(fx * 1000), (int)(fy * 1000), (int)(fz * 1000));
+      postureChar.writeValue(buf);
+      if (DEBUG) { Serial.print("[POSTURE] "); Serial.println(buf); }
+    }
+    delay(4);
+    return;
+  }
 
   // ---- отладка: максимумы за последние 500 мс ----
   static float dbgOmega = 0, dbgG = 0; static uint32_t dbgT = 0;
@@ -155,7 +198,7 @@ void loop() {
     const char* names[] = {"IDLE","ARMED","BACK","DOWN","COOL"};
     Serial.print("["); Serial.print(names[state]); Serial.print("] omega=");
     Serial.print(dbgOmega, 0); Serial.print(" dps  g="); Serial.print(dbgG, 1);
-    Serial.print("  idle="); Serial.print((now - tLastMotion) / 1000); Serial.println("s  fw5");
+    Serial.print("  idle="); Serial.print((now - tLastMotion) / 1000); Serial.println("s  fw6");
     dbgOmega = 0; dbgG = 0; dbgT = now;
   }
 
