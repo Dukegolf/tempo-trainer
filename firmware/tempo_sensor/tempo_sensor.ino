@@ -4,8 +4,11 @@
  *
  * Режимы (переключает приложение записью в MODE-характеристику):
  *   'G' — гольф: детекция темпа свинга (ниже)
- *   'P' — осанка: раз в 500 мс отправляет сглаженный вектор гравитации "ax,ay,az" (×1000),
- *         углы и калибровку считает приложение
+ *   'P' — осанка: раз в 500 мс отправляет сглаженный вектор гравитации "ax,ay,az" (×1000);
+ *         сам считает угол к запомненной позе и вибрирует, если сутулость дольше POSTURE_GRACE_MS.
+ *         Калибровка без телефона: двойное постукивание по датчику → "бзз" → 2 с выпрямиться → "бз-бз".
+ *         Из приложения: записать 'C' в MODE — калибровка сразу.
+ *   Вибромотор: D1 → 1 кОм → база NPN (S8050); эмиттер → GND; коллектор → мотор− ; мотор+ → 3V3; диод 1N4148 параллельно мотору.
  *
  * Гольф, что делает:
  *   1. Ждёт, пока клюшка неподвижна (адрес).
@@ -53,6 +56,32 @@ const uint32_t POSTURE_SLEEP_MS = 60UL * 60UL * 1000UL;  // в режиме ос
 const float POSTURE_MOTION_DPS = 8.0;  // сидящий человек всё равно чуть двигается
 float fx = 0, fy = 0, fz = 1;          // сглаженная гравитация
 const float LP_ALPHA = 0.02;           // ~0.25 с при 200 Гц
+
+// ---------- Осанка: автономная логика ----------
+const int   VIB_PIN = D1;                        // транзистор вибромотора
+const float POSTURE_THR_DEG = 12.0;              // порог наклона от запомненной позы
+const uint32_t POSTURE_GRACE_MS = 15000;         // сколько терпеть наклон до сигнала
+const uint32_t POSTURE_REPEAT_MS = 30000;        // повтор сигнала, пока не выпрямился
+float rx = 0, ry = 0, rz = 0; bool haveRef = false;   // запомненная "ровная" поза
+uint32_t tBadSince = 0, tLastBuzz = 0, tCalibAt = 0;
+
+void vib(uint16_t ms) {                          // вибрация + дублируем светодиодом
+  digitalWrite(VIB_PIN, HIGH); digitalWrite(LED_BUILTIN, LOW); delay(ms);
+  digitalWrite(VIB_PIN, LOW);  digitalWrite(LED_BUILTIN, HIGH);
+}
+void buzzPattern(uint8_t n, uint16_t on, uint16_t off) { for (uint8_t i = 0; i < n; i++) { vib(on); if (i + 1 < n) delay(off); } }
+void setPostureRef() {
+  float n = sqrtf(fx*fx + fy*fy + fz*fz); if (n < 0.5) return;
+  rx = fx / n; ry = fy / n; rz = fz / n; haveRef = true; tBadSince = 0;
+  if (DEBUG) Serial.println(">> POSTURE REF SET");
+  buzzPattern(2, 120, 120);
+}
+void setupTap() {                                // LSM6DS3: детекция двойного тапа, читаем TAP_SRC
+  imu.writeRegister(0x58, 0x8F);   // TAP_CFG: INT_EN, tap X/Y/Z, LIR
+  imu.writeRegister(0x59, 0x8C);   // TAP_THS_6D: порог тапа
+  imu.writeRegister(0x5A, 0x7F);   // INT_DUR2: dur/quiet/shock
+  imu.writeRegister(0x5B, 0x80);   // WAKE_UP_THS: single+double tap
+}
 
 LSM6DS3 imu(I2C_MODE, 0x6A);
 
@@ -109,6 +138,7 @@ void blink(uint8_t n) {
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
+  pinMode(VIB_PIN, OUTPUT); digitalWrite(VIB_PIN, LOW);
   Serial.begin(115200);
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 2000) {}
@@ -116,11 +146,12 @@ void setup() {
   imu.settings.gyroRange = 2000;           // °/с
   imu.settings.gyroSampleRate = 208;       // Гц
   imu.settings.accelRange = 16;            // g
-  imu.settings.accelSampleRate = 208;
+  imu.settings.accelSampleRate = 416;      // для детекции тапа лучше ≥416
   if (imu.begin() != 0) {
     Serial.println("IMU error");
     while (1) blink(1);
   }
+  setupTap();
 
   if (!BLE.begin()) {
     Serial.println("BLE error");
@@ -167,6 +198,7 @@ void loop() {
     uint8_t m = modeChar.value();
     if (m == 'G' || m == 'P') { mode = (char)m; state = IDLE; tStill = 0; tLastMotion = now;
       if (DEBUG) { Serial.print(">> MODE "); Serial.println(mode); } }
+    if (m == 'C' && mode == 'P') setPostureRef();
   }
 
   // ---- автосон (в режиме осанки — мягче) ----
@@ -178,11 +210,33 @@ void loop() {
   // ---- режим осанки ----
   if (mode == 'P') {
     fx += LP_ALPHA * (ax - fx); fy += LP_ALPHA * (ay - fy); fz += LP_ALPHA * (az - fz);
+
+    // двойной тап → через 2 с запоминаем позу
+    uint8_t tapSrc = 0; imu.readRegister(&tapSrc, 0x1C);
+    if ((tapSrc & 0x10) && now - tCalibAt > 3000) {   // DOUBLE_TAP
+      tCalibAt = now; vib(150);
+      if (DEBUG) Serial.println(">> DOUBLE TAP: straighten up...");
+    }
+    if (tCalibAt && now - tCalibAt >= 2000) { tCalibAt = 0; setPostureRef(); }
+
+    // угол к запомненной позе
+    float ang = -1, n = sqrtf(fx*fx + fy*fy + fz*fz);
+    if (haveRef && n > 0.5) {
+      float c = (fx*rx + fy*ry + fz*rz) / n; c = c > 1 ? 1 : (c < -1 ? -1 : c);
+      ang = acosf(c) * 57.2958f;
+      bool bad = ang > POSTURE_THR_DEG;
+      if (bad) { if (!tBadSince) tBadSince = now; } else tBadSince = 0;
+      if (bad && now - tBadSince > POSTURE_GRACE_MS && now - tLastBuzz > POSTURE_REPEAT_MS) {
+        tLastBuzz = now; buzzPattern(2, 200, 150);
+        if (DEBUG) Serial.println(">> BUZZ: straighten up");
+      }
+    }
+
     static uint32_t tPost = 0;
     if (now - tPost >= 500) {
       tPost = now;
       char buf[24];
-      snprintf(buf, sizeof(buf), "%d,%d,%d", (int)(fx * 1000), (int)(fy * 1000), (int)(fz * 1000));
+      snprintf(buf, sizeof(buf), "%d,%d,%d,%d", (int)(fx * 1000), (int)(fy * 1000), (int)(fz * 1000), (int)ang);
       postureChar.writeValue(buf);
       if (DEBUG) { Serial.print("[POSTURE] "); Serial.println(buf); }
     }
@@ -198,7 +252,7 @@ void loop() {
     const char* names[] = {"IDLE","ARMED","BACK","DOWN","COOL"};
     Serial.print("["); Serial.print(names[state]); Serial.print("] omega=");
     Serial.print(dbgOmega, 0); Serial.print(" dps  g="); Serial.print(dbgG, 1);
-    Serial.print("  idle="); Serial.print((now - tLastMotion) / 1000); Serial.println("s  fw6");
+    Serial.print("  idle="); Serial.print((now - tLastMotion) / 1000); Serial.println("s  fw7");
     dbgOmega = 0; dbgG = 0; dbgT = now;
   }
 

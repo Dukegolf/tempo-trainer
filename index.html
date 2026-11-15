@@ -177,7 +177,7 @@ td:last-child{text-align:right;font-weight:600}
         <div><label for="pThr">Порог, °</label><input id="pThr" type="number" inputmode="numeric" value="12" min="5" max="30"></div>
         <div><label for="pGrace">Терпимость, с</label><input id="pGrace" type="number" inputmode="numeric" value="15" min="3" max="120"></div>
       </div>
-      <p class="note" style="margin-top:8px">Калибровка: сядьте или встаньте ровно, нажмите «Калибровать» и не двигайтесь 2 секунды. Если наклон держится дольше терпимости — сигнал.</p>
+      <p class="note" style="margin-top:8px">Калибровка: сядьте ровно и нажмите «Калибровать» — или без телефона дважды стукните по датчику, выпрямитесь, через 2 секунды он подтвердит вибрацией. Датчик сам вибрирует при сутулости дольше 15 с (пороги в прошивке); здесь — статистика и настройки сигнала телефона.</p>
     </section>
 
     <section>
@@ -318,7 +318,7 @@ function toggleMetro(){
 }
 
 /* ---------- Осанка ---------- */
-let pRef=null, pFwdAxis=null, pLast=null, pBadSince=0, pAlertAt=0, pTick=null, demoPTimer=null, pVoice=true, wakeLock=null;
+let pRef=null, pFwdAxis=null, pLast=null, pFwAng=null, pBadSince=0, pAlertAt=0, pTick=null, demoPTimer=null, pVoice=true, wakeLock=null;
 let pDay={date:todayKey(),good:0,bad:0,alerts:0,log:[]};
 function todayKey(){ return new Date().toISOString().slice(0,10); }
 try{ const d=JSON.parse(localStorage.getItem('posture.day')||'null'); if(d&&d.date===todayKey()) pDay=d;
@@ -332,10 +332,10 @@ const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 async function sendMode(){ if(!modeChar) return; try{ await modeChar.writeValue(new Uint8Array([appMode==='posture'?80:71])); }catch(e){} }
 function onPosturePacket(ev){
   const t=new TextDecoder().decode(ev.target.value).trim(); const v=t.split(',').map(Number);
-  if(v.length===3&&v.every(Number.isFinite)) onGravity(norm(v));
+  if(v.length>=3&&v.slice(0,3).every(Number.isFinite)) onGravity(norm(v.slice(0,3)), v[3]);
 }
-function onGravity(g){
-  pLast=g;
+function onGravity(g,fwAng){
+  pLast=g; pFwAng=(fwAng>=0)?fwAng:null;
   if(!pRef){ $('pdeg').textContent='—'; $('pstate').textContent='Нажмите «Калибровать»'; $('phero').className='hero'; return; }
   const c=Math.max(-1,Math.min(1,dot(g,pRef))); const ang=Math.acos(c)*180/Math.PI;
   // разложение: вперёд — по оси, запомненной при калибровке (ось, перпендикулярная gравитации, направленная "вперёд")
@@ -349,7 +349,7 @@ function onGravity(g){
   $('pfwd').textContent=fwd===null?'—':(fwd>0?'+':'')+fwd.toFixed(0);
   $('pside').textContent=side===null?'—':(side>0?'+':'')+side.toFixed(0);
   $('phero').className='hero '+(over?'bad':bad?'warn':'good');
-  $('pstate').textContent=over?'Выпрямитесь':bad?'Наклон':'Ровно';
+  $('pstate').textContent=(over?'Выпрямитесь':bad?'Наклон':'Ровно')+(pFwAng===null?' · датчик не откалиброван':'');
   // статистика: пакет раз в 0.5 с
   if(pDay.date!==todayKey()) pDay={date:todayKey(),good:0,bad:0,alerts:0,log:[]};
   if(bad) pDay.bad+=0.5; else pDay.good+=0.5;
@@ -369,8 +369,10 @@ function renderPosture(){
   $('pGood').textContent=pct===null?'—':pct+'%'; $('pTime').textContent=Math.round(tot/60)+' мин'; $('pAlerts').textContent=pDay.alerts;
   $('dbGood').style.width=(tot?pDay.good/tot*100:0)+'%'; $('dbBad').style.width=(tot?pDay.bad/tot*100:0)+'%';
 }
+async function sendCalib(){ if(!modeChar) return; try{ await modeChar.writeValue(new Uint8Array([67])); }catch(e){} }
 function calibrate(){
   if(!pLast){ $('pstate').textContent='Нет данных с датчика'; return; }
+  sendCalib();
   $('pstate').textContent='Не двигайтесь…'; const samples=[];
   const h=()=>{ if(pLast) samples.push(pLast); };
   const iv=setInterval(h,250);
