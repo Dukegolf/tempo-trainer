@@ -80,8 +80,8 @@ void setPostureRef() {
 }
 void setupTap() {                                // LSM6DS3: детекция двойного тапа, читаем TAP_SRC
   imu.writeRegister(0x58, 0x8F);   // TAP_CFG: INT_EN, tap X/Y/Z, LIR
-  imu.writeRegister(0x59, 0x8C);   // TAP_THS_6D: порог тапа
-  imu.writeRegister(0x5A, 0x7F);   // INT_DUR2: dur/quiet/shock
+  imu.writeRegister(0x59, 0x03);   // TAP_THS_6D: порог тапа 3/32 от ±16g ≈ 1.5 g
+  imu.writeRegister(0x5A, 0x7E);   // INT_DUR2: DUR=7 (пауза между тапами ~0.5 с), QUIET=3, SHOCK=2
   imu.writeRegister(0x5B, 0x80);   // WAKE_UP_THS: single+double tap
 }
 
@@ -214,6 +214,7 @@ void loop() {
 
     // двойной тап → через 2 с запоминаем позу
     uint8_t tapSrc = 0; imu.readRegister(&tapSrc, 0x1C);
+    if (DEBUG && (tapSrc & 0x30)) { Serial.print(">> TAP_SRC=0x"); Serial.println(tapSrc, HEX); }
     if ((tapSrc & 0x10) && now - tCalibAt > 3000) {   // DOUBLE_TAP
       tCalibAt = now; vib(150);
       if (DEBUG) Serial.println(">> DOUBLE TAP: straighten up...");
@@ -253,7 +254,7 @@ void loop() {
     const char* names[] = {"IDLE","ARMED","BACK","DOWN","COOL"};
     Serial.print("["); Serial.print(names[state]); Serial.print("] omega=");
     Serial.print(dbgOmega, 0); Serial.print(" dps  g="); Serial.print(dbgG, 1);
-    Serial.print("  idle="); Serial.print((now - tLastMotion) / 1000); Serial.println("s  fw7");
+    Serial.print("  idle="); Serial.print((now - tLastMotion) / 1000); Serial.println("s  fw8");
     dbgOmega = 0; dbgG = 0; dbgT = now;
   }
 
