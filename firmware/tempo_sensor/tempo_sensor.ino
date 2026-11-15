@@ -51,6 +51,8 @@ BLECharacteristic tempoChar(TEMPO_UUID, BLERead | BLENotify, 20);
 BLEByteCharacteristic modeChar(MODE_UUID, BLERead | BLEWrite);
 BLECharacteristic postureChar(POSTURE_UUID, BLERead | BLENotify, 24);
 
+LSM6DS3 imu(I2C_MODE, 0x6A);
+
 char mode = 'G';                       // 'G' гольф / 'P' осанка
 const uint32_t POSTURE_SLEEP_MS = 60UL * 60UL * 1000UL;  // в режиме осанки спать только через час без движения
 const float POSTURE_MOTION_DPS = 8.0;  // сидящий человек всё равно чуть двигается
@@ -83,7 +85,6 @@ void setupTap() {                                // LSM6DS3: детекция д
   imu.writeRegister(0x5B, 0x80);   // WAKE_UP_THS: single+double tap
 }
 
-LSM6DS3 imu(I2C_MODE, 0x6A);
 
 enum State { IDLE, ARMED, BACKSWING, DOWNSWING, COOLDOWN };
 State state = IDLE;
